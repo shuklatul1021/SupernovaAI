@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   BookOpen,
   Brain,
+  MessageCircle,
   TrendingUp,
   Settings,
   LogOut,
@@ -21,6 +22,7 @@ const sidebarLinks = [
   { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { name: "Study Plan", href: "/dashboard/study-plan", icon: BookOpen },
   { name: "Take Quiz", href: "/dashboard/quiz", icon: Brain },
+  { name: "Chat", href: "/dashboard/chat", icon: MessageCircle },
   { name: "Progress", href: "/dashboard/progress", icon: TrendingUp },
   { name: "Profile", href: "/dashboard/profile", icon: User },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
@@ -42,7 +44,9 @@ export default function DashboardClientLayout({
         <div className="px-6 h-16 flex items-center border-b border-foreground/10">
           <Link href="/" className="flex items-center gap-2">
             <span className="text-xl font-display">Supernova</span>
-            <span className="text-[15px] text-muted-foreground font-mono mt-0.5">AI</span>
+            <span className="text-[15px] text-muted-foreground font-mono mt-0.5">
+              AI
+            </span>
           </Link>
         </div>
 
@@ -85,13 +89,19 @@ export default function DashboardClientLayout({
         <div className="flex items-center justify-between px-4 h-14">
           <Link href="/" className="flex items-center gap-2">
             <span className="text-lg font-display">Supernova</span>
-            <span className="text-[10px] text-muted-foreground font-mono">AI</span>
+            <span className="text-[10px] text-muted-foreground font-mono">
+              AI
+            </span>
           </Link>
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             className="p-2"
           >
-            {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {isSidebarOpen ? (
+              <X className="w-5 h-5" />
+            ) : (
+              <Menu className="w-5 h-5" />
+            )}
           </button>
         </div>
       </div>
@@ -131,9 +141,7 @@ export default function DashboardClientLayout({
 
       {/* Main Content */}
       <main className="flex-1 lg:overflow-y-auto">
-        <div className="pt-14 lg:pt-0">
-          {children}
-        </div>
+        <div className="pt-14 lg:pt-0">{children}</div>
       </main>
     </div>
   );
