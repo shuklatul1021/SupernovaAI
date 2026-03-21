@@ -1,6 +1,11 @@
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { studySessions, userBackgrounds, users } from "@/lib/db/schema";
+import {
+  studySessions,
+  userBackgrounds,
+  userMetrics,
+  users,
+} from "@/lib/db/schema";
 import { and, desc, eq, gte } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { Target, Mail, GraduationCap } from "lucide-react";
@@ -25,6 +30,10 @@ export default async function ProfilePage() {
     orderBy: [desc(userBackgrounds.createdAt)],
   });
 
+  const metrics = await db.query.userMetrics.findFirst({
+    where: eq(userMetrics.userId, session.user.id),
+  });
+
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - 99);
   startDate.setHours(0, 0, 0, 0);
@@ -37,13 +46,21 @@ export default async function ProfilePage() {
     orderBy: [studySessions.date],
   });
 
+  type SessionRow = {
+    date: Date;
+    hours: number;
+  };
+
+  const typedSessions = sessions as SessionRow[];
+
   const activityData = Array.from({ length: 100 }, (_, index) => {
     const date = new Date();
     date.setDate(date.getDate() - (99 - index));
     date.setHours(0, 0, 0, 0);
 
-    const daySession = sessions.find(
-      (entry) => new Date(entry.date).toDateString() === date.toDateString(),
+    const daySession = typedSessions.find(
+      (entry: SessionRow) =>
+        new Date(entry.date).toDateString() === date.toDateString(),
     );
     const hours = Number(daySession?.hours ?? 0);
 
@@ -51,6 +68,35 @@ export default async function ProfilePage() {
       hours <= 0 ? 0 : hours < 1 ? 1 : hours < 2 ? 2 : hours < 3 ? 3 : 4;
     return { date, intensity };
   });
+
+  const monthMarkers = activityData
+    .map((entry, index) => ({
+      index,
+      month: entry.date.toLocaleDateString("en-US", { month: "short" }),
+      year: entry.date.getFullYear(),
+    }))
+    .filter((entry, index, array) => {
+      if (index === 0) {
+        return true;
+      }
+      const previous = array[index - 1];
+      return previous.month !== entry.month || previous.year !== entry.year;
+    });
+
+  const memberSince = user?.createdAt
+    ? new Date(user.createdAt).toLocaleDateString("en-US", {
+        month: "long",
+        year: "numeric",
+      })
+    : "N/A";
+
+  const lastActive = metrics?.lastStudyDate
+    ? new Date(metrics.lastStudyDate).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "No recent study";
 
   // Helper for heatmap colors
   const getIntensityColor = (intensity: number) => {
@@ -139,7 +185,41 @@ export default async function ProfilePage() {
           </span>
         </h3>
 
+        <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-muted-foreground">
+          <span className="px-2 py-1 rounded bg-foreground/5 border border-foreground/10">
+            Current Streak: {metrics?.studyStreak ?? 0} days
+          </span>
+          <span className="px-2 py-1 rounded bg-foreground/5 border border-foreground/10">
+            Last Active: {lastActive}
+          </span>
+          <span className="px-2 py-1 rounded bg-foreground/5 border border-foreground/10">
+            Member Since: {memberSince}
+          </span>
+        </div>
+
         <div className="bg-background rounded-3xl border border-foreground/10 p-6 md:p-8 overflow-x-auto">
+          <div className="flex min-w-max mb-2 text-[10px] text-muted-foreground font-mono">
+            {monthMarkers.map((marker) => (
+              <div
+                key={`${marker.month}-${marker.year}-${marker.index}`}
+                className="absolute"
+                style={{ left: `${marker.index * 5}px` }}
+              />
+            ))}
+          </div>
+
+          <div className="relative min-w-max mb-3 h-4">
+            {monthMarkers.map((marker) => (
+              <span
+                key={`${marker.month}-${marker.year}-${marker.index}-label`}
+                className="absolute text-[10px] text-muted-foreground font-mono"
+                style={{ left: `${Math.floor(marker.index / 7) * 20}px` }}
+              >
+                {marker.month}
+              </span>
+            ))}
+          </div>
+
           <div className="flex gap-1 min-w-max">
             {/* Split data into columns of 7 days (weeks) */}
             {Array.from({ length: Math.ceil(activityData.length / 7) }).map(

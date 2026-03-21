@@ -47,7 +47,7 @@ export function Navigation() {
           {/* Logo */}
           <a href="#" className="flex items-center gap-2 group">
             <span className={`font-display tracking-tight transition-all duration-500 ${isScrolled ? "text-xl" : "text-2xl"}`}>Supernova</span>
-            <span className={`text-muted-foreground font-mono transition-all duration-500 ${isScrolled ? "text-[10px] mt-0.5" : "text-xs mt-1"}`}>AI</span>
+            <span className={`text-muted-foreground font-mono transition-all duration-500 ${isScrolled ? "text-lg mt-0.5" : "text-2xs mt-1"}`}>AI</span>
           </a>
 
           {/* Desktop Navigation */}

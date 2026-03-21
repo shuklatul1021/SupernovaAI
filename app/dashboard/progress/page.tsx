@@ -32,6 +32,14 @@ export default async function ProgressPage() {
     }),
   );
 
+  const actionLabel: Record<string, string> = {
+    workspace_initialized: "Workspace initialized",
+    study_plan_generated: "Study plan generated",
+    quiz_submitted: "Quiz submitted",
+    chat_message: "Chat interaction",
+    topic_completed: "Topic completed",
+  };
+
   return (
     <div className="p-6 lg:p-10 max-w-6xl mx-auto space-y-10">
       <div className="flex items-start justify-between">
@@ -160,6 +168,48 @@ export default async function ProgressPage() {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <h3 className="text-xl font-display">Recent Activity</h3>
+        <div className="bg-background rounded-3xl border border-foreground/10 p-6 md:p-8">
+          {snapshot.recentActivity.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No activity yet. Start by taking a quiz or chatting with AI.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {snapshot.recentActivity
+                .slice(0, 10)
+                .map(
+                  (activity: {
+                    id: string;
+                    actionType: string;
+                    durationMinutes: number;
+                    createdAt: Date;
+                  }) => (
+                    <div
+                      key={activity.id}
+                      className="flex items-center justify-between border border-foreground/10 rounded-xl px-4 py-3"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">
+                          {actionLabel[activity.actionType] ??
+                            activity.actionType}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(activity.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <span className="text-xs font-mono text-muted-foreground">
+                        {activity.durationMinutes} min
+                      </span>
+                    </div>
+                  ),
+                )}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -7,6 +7,7 @@ import {
   studyPlans,
   studySessions,
   topics,
+  userActivityLogs,
   userBackgrounds,
   userMetrics,
   users,
@@ -34,6 +35,12 @@ type QuizGeneration = {
   quizQuestions: QuizQuestionPlan[];
 };
 
+type QuizGenerationInput = {
+  subject?: string;
+  exam?: string;
+  totalQuestions?: number;
+};
+
 type PlanResource = {
   type: "video" | "article" | "practice";
   title: string;
@@ -44,6 +51,7 @@ type PlanTopic = {
   name: string;
   difficulty: "easy" | "medium" | "hard";
   duration: string;
+  content: string;
   resources: PlanResource[];
 };
 
@@ -69,6 +77,21 @@ type StudyPlanInput = {
   learningGoals?: string;
 };
 
+type ActivityActionType =
+  | "workspace_initialized"
+  | "study_plan_generated"
+  | "quiz_submitted"
+  | "chat_message"
+  | "topic_completed";
+
+type TrackUserActivityInput = {
+  actionType: ActivityActionType;
+  entityType: "workspace" | "study_plan" | "quiz" | "chat" | "topic";
+  entityId?: string | null;
+  durationMinutes?: number;
+  metadata?: Record<string, unknown>;
+};
+
 function getApiKey() {
   return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 }
@@ -83,6 +106,168 @@ function getLast7DaysStart(): Date {
   const date = getTodayAtMidnight();
   date.setDate(date.getDate() - 6);
   return date;
+}
+
+function buildFallbackResources(
+  subject: string,
+  topic: string,
+): PlanResource[] {
+  const query = `${subject} ${topic}`.trim();
+  const encodedQuery = encodeURIComponent(query);
+  const wikiTopic = encodeURIComponent(topic.trim().replace(/\s+/g, "_"));
+
+  return [
+    {
+      type: "video",
+      title: `${topic} - YouTube lessons`,
+      url: `https://www.youtube.com/results?search_query=${encodedQuery}`,
+    },
+    {
+      type: "article",
+      title: `${topic} - Documentation / Notes`,
+      url: `https://en.wikipedia.org/wiki/${wikiTopic}`,
+    },
+  ];
+}
+
+function isValidHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function normalizeResourceLinks(resources: PlanResource[]): PlanResource[] {
+  const uniqueUrls = new Set<string>();
+
+  return resources
+    .filter((resource) => isValidHttpUrl(resource.url))
+    .filter((resource) => {
+      if (uniqueUrls.has(resource.url)) {
+        return false;
+      }
+      uniqueUrls.add(resource.url);
+      return true;
+    })
+    .slice(0, 2);
+}
+
+function dayKey(input: Date): string {
+  return new Date(input).toISOString().slice(0, 10);
+}
+
+async function recomputeAndUpsertMetrics(userId: string) {
+  const [quizzesAgg, topicsDoneCount, sessions] = await Promise.all([
+    db
+      .select({
+        avgScore: sql<number>`coalesce(avg(${quizResults.score}), 0)`,
+        quizzesTaken: sql<number>`count(*)`,
+      })
+      .from(quizResults)
+      .where(eq(quizResults.userId, userId)),
+    db
+      .select({ count: sql<number>`count(*)` })
+      .from(topics)
+      .innerJoin(studyPlans, eq(topics.studyPlanId, studyPlans.id))
+      .where(
+        and(eq(studyPlans.userId, userId), eq(topics.status, "completed")),
+      ),
+    db.query.studySessions.findMany({
+      where: eq(studySessions.userId, userId),
+      orderBy: [desc(studySessions.date)],
+    }),
+  ]);
+
+  const averageQuizScore = Number(quizzesAgg[0]?.avgScore ?? 0);
+  const quizzesTaken = Number(quizzesAgg[0]?.quizzesTaken ?? 0);
+  const topicsCompleted = Number(topicsDoneCount[0]?.count ?? 0);
+  const totalStudyHours = sessions.reduce(
+    (sum: number, session: { hours: number }) =>
+      sum + Number(session.hours ?? 0),
+    0,
+  );
+
+  const activeDays = new Set(
+    sessions.map((session: { date: Date }) => dayKey(new Date(session.date))),
+  );
+  const today = getTodayAtMidnight();
+  let cursor = new Date(today);
+  let studyStreak = 0;
+
+  while (activeDays.has(dayKey(cursor))) {
+    studyStreak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  await db
+    .insert(userMetrics)
+    .values({
+      userId,
+      studyStreak,
+      totalStudyHours,
+      topicsCompleted,
+      averageQuizScore,
+      quizzesTaken,
+      lastStudyDate: activeDays.has(dayKey(today)) ? today : null,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: userMetrics.userId,
+      set: {
+        studyStreak,
+        totalStudyHours,
+        topicsCompleted,
+        averageQuizScore,
+        quizzesTaken,
+        lastStudyDate: activeDays.has(dayKey(today)) ? today : null,
+        updatedAt: new Date(),
+      },
+    });
+}
+
+export async function trackUserActivity(
+  userId: string,
+  input: TrackUserActivityInput,
+) {
+  const durationMinutes = Math.max(0, Number(input.durationMinutes ?? 0));
+
+  await db.insert(userActivityLogs).values({
+    userId,
+    actionType: input.actionType,
+    entityType: input.entityType,
+    entityId: input.entityId ?? null,
+    durationMinutes,
+    metadata: input.metadata ? JSON.stringify(input.metadata) : null,
+  });
+
+  if (durationMinutes > 0) {
+    const today = getTodayAtMidnight();
+    const existingSession = await db.query.studySessions.findFirst({
+      where: and(
+        eq(studySessions.userId, userId),
+        eq(studySessions.date, today),
+      ),
+    });
+
+    const incrementHours = Number((durationMinutes / 60).toFixed(2));
+
+    if (existingSession) {
+      await db
+        .update(studySessions)
+        .set({ hours: Number(existingSession.hours ?? 0) + incrementHours })
+        .where(eq(studySessions.id, existingSession.id));
+    } else {
+      await db.insert(studySessions).values({
+        userId,
+        date: today,
+        hours: incrementHours,
+      });
+    }
+  }
+
+  await recomputeAndUpsertMetrics(userId);
 }
 
 function normalizeQuizPayload(raw: unknown): QuizGeneration {
@@ -200,6 +385,12 @@ function normalizeStudyPlanPayload(
             })
             .filter((resource): resource is PlanResource => Boolean(resource));
 
+          const safeResources = normalizeResourceLinks(
+            resources.length
+              ? resources
+              : buildFallbackResources(fallbackInput.subject, topic.name),
+          );
+
           const difficulty =
             topic.difficulty === "easy" || topic.difficulty === "hard"
               ? topic.difficulty
@@ -210,7 +401,11 @@ function normalizeStudyPlanPayload(
             difficulty,
             duration:
               typeof topic.duration === "string" ? topic.duration : "2h",
-            resources,
+            content:
+              typeof topic.content === "string" && topic.content.trim().length
+                ? topic.content.trim()
+                : `Module: ${topic.name}\n\n1) Core concepts:\n- Definition and key ideas\n- Why this topic matters\n\n2) Worked understanding:\n- One simple real example\n- One common mistake to avoid\n\n3) Revision notes:\n- Important formulas or rules\n- 3 quick recap points`,
+            resources: safeResources,
           } as PlanTopic;
         })
         .filter((topic): topic is PlanTopic => Boolean(topic));
@@ -266,6 +461,8 @@ async function callGemini(prompt: string) {
     },
   });
 
+  console.log("Gemini raw response:", response);
+
   const text = typeof response.text === "string" ? response.text : "";
 
   if (!text) {
@@ -308,6 +505,117 @@ ${JSON.stringify(profile, null, 2)}`;
   return normalizeQuizPayload(raw);
 }
 
+async function generateQuizForContext(
+  profile: ProfileInput,
+  input: QuizGenerationInput,
+): Promise<QuizGeneration> {
+  const desiredQuestions = Math.min(
+    20,
+    Math.max(5, Number(input.totalQuestions ?? 10)),
+  );
+
+  const prompt = `Generate ONLY a personalized quiz question set as valid JSON.
+
+Return exactly this shape:
+{
+  "subject": string,
+  "exam": string,
+  "quizQuestions": [
+    {
+      "topic": string,
+      "question": string,
+      "options": string[],
+      "correctAnswer": number,
+      "explanation": string
+    }
+  ]
+}
+
+Rules:
+- Return exactly ${desiredQuestions} questions.
+- Focus on subject: ${input.subject ?? "General"}.
+- Align exam context to: ${input.exam ?? "Diagnostic Quiz"}.
+- Each question must have 4 options.
+- correctAnswer must be a 0-based index.
+
+Learner profile:
+${JSON.stringify(profile, null, 2)}`;
+
+  const raw = await callGemini(prompt);
+  const normalized = normalizeQuizPayload(raw);
+
+  return {
+    subject: input.subject?.trim() || normalized.subject,
+    exam: input.exam?.trim() || normalized.exam,
+    quizQuestions: normalized.quizQuestions.slice(0, desiredQuestions),
+  };
+}
+
+export async function createQuizForUser(
+  userId: string,
+  input: QuizGenerationInput,
+) {
+  const [user, latestBackground] = await Promise.all([
+    db.query.users.findFirst({ where: eq(users.id, userId) }),
+    db.query.userBackgrounds.findFirst({
+      where: eq(userBackgrounds.userId, userId),
+      orderBy: [desc(userBackgrounds.createdAt)],
+    }),
+  ]);
+
+  if (!user || !latestBackground) {
+    throw new Error("User onboarding profile not found");
+  }
+
+  const generated = await generateQuizForContext(
+    {
+      name: user.name ?? "Student",
+      educationLevel: latestBackground.educationLevel as "school" | "college",
+      grade: latestBackground.grade,
+      course: latestBackground.course,
+      branch: latestBackground.branch,
+    },
+    input,
+  );
+
+  await db.delete(quizQuestions).where(eq(quizQuestions.userId, userId));
+
+  const questionRows = generated.quizQuestions.map((question) => ({
+    userId,
+    studyPlanId: null,
+    subject: generated.subject,
+    topic: question.topic,
+    question: question.question,
+    options: JSON.stringify(question.options),
+    correctAnswer: question.correctAnswer,
+    explanation: question.explanation,
+  }));
+
+  if (!questionRows.length) {
+    throw new Error("Quiz generation returned no savable questions");
+  }
+
+  await db.insert(quizQuestions).values(questionRows);
+
+  await trackUserActivity(userId, {
+    actionType: "quiz_submitted",
+    entityType: "quiz",
+    durationMinutes: 10,
+    metadata: {
+      generated: true,
+      subject: generated.subject,
+      exam: generated.exam,
+      totalQuestions: questionRows.length,
+    },
+  });
+
+  return {
+    subject: generated.subject,
+    exam: generated.exam,
+    totalQuestions: questionRows.length,
+  };
+}
+
 async function generateStudyPlan(
   profile: ProfileInput,
   input: StudyPlanInput,
@@ -329,6 +637,7 @@ Return exactly this shape:
           "name": string,
           "difficulty": "easy" | "medium" | "hard",
           "duration": string,
+          "content": string,
           "resources": [
             { "type": "video" | "article" | "practice", "title": string, "url": string }
           ]
@@ -343,6 +652,14 @@ Rules:
 - Keep total days near requested days.
 - Keep 2-5 topics per day.
 - Include date only when meaningful.
+- For every topic, return detailed AI learning content in "content" with:
+  1) core concepts,
+  2) worked understanding/example,
+  3) revision notes,
+  4) quick self-check questions.
+- For every topic, return only 1 or 2 links in "resources".
+- Prefer one YouTube link and one article/documentation link.
+- Links must be real, valid HTTP/HTTPS URLs.
 
 Learner profile:
 ${JSON.stringify(profile, null, 2)}
@@ -437,6 +754,13 @@ export async function ensureWorkspaceInitialized(userId: string) {
     .set({ workspaceInitialized: 1 })
     .where(eq(users.id, userId));
 
+  await trackUserActivity(userId, {
+    actionType: "workspace_initialized",
+    entityType: "workspace",
+    durationMinutes: 0,
+    metadata: { quizCount: questionRows.length },
+  });
+
   return { initializedNow: true, quizCount: questionRows.length };
 }
 
@@ -488,7 +812,7 @@ export async function createStudyPlanForUser(
       status: dayIndex === 0 && topicIndex === 0 ? "in_progress" : "pending",
       difficulty: topic.difficulty,
       resources: JSON.stringify(topic.resources),
-      notes: null,
+      notes: topic.content,
     })),
   );
 
@@ -496,81 +820,129 @@ export async function createStudyPlanForUser(
     await db.insert(topics).values(topicRows);
   }
 
-  return { planId: plan.id };
+  await trackUserActivity(userId, {
+    actionType: "study_plan_generated",
+    entityType: "study_plan",
+    entityId: plan.id,
+    durationMinutes: 20,
+    metadata: {
+      subject: generated.subject,
+      exam: generated.exam,
+      totalDays: generated.totalDays,
+      hoursPerDay: generated.hoursPerDay,
+    },
+  });
+
+  return {
+    planId: plan.id,
+    content: {
+      subject: generated.subject,
+      exam: generated.exam,
+      totalDays: generated.totalDays,
+      hoursPerDay: generated.hoursPerDay,
+      days: generated.days,
+    },
+  };
+}
+
+export async function completeCurrentStudyDay(userId: string) {
+  const plan = await db.query.studyPlans.findFirst({
+    where: eq(studyPlans.userId, userId),
+    orderBy: [desc(studyPlans.createdAt)],
+  });
+
+  if (!plan) {
+    throw new Error("No study plan found");
+  }
+
+  const planTopics = await db.query.topics.findMany({
+    where: eq(topics.studyPlanId, plan.id),
+  });
+
+  if (!planTopics.length) {
+    throw new Error("No topics found for plan");
+  }
+
+  type PlanTopicRow = {
+    id: string;
+    day: number;
+    name: string;
+    status: string;
+  };
+
+  const typedPlanTopics = planTopics as PlanTopicRow[];
+
+  const inProgressTopic = typedPlanTopics.find(
+    (topic: PlanTopicRow) => topic.status === "in_progress",
+  );
+  const firstPendingTopic = typedPlanTopics.find(
+    (topic: PlanTopicRow) => topic.status === "pending",
+  );
+  const currentDay =
+    inProgressTopic?.day ??
+    firstPendingTopic?.day ??
+    typedPlanTopics
+      .map((topic: PlanTopicRow) => topic.day)
+      .sort((first: number, second: number) => first - second)[0];
+
+  const currentDayTopics = typedPlanTopics.filter(
+    (topic: PlanTopicRow) => topic.day === currentDay,
+  );
+  const nextDay =
+    typedPlanTopics
+      .map((topic: PlanTopicRow) => topic.day)
+      .filter((day: number) => day > currentDay)
+      .sort((first: number, second: number) => first - second)[0] ?? null;
+
+  if (currentDayTopics.length) {
+    await db
+      .update(topics)
+      .set({ status: "completed" })
+      .where(and(eq(topics.studyPlanId, plan.id), eq(topics.day, currentDay)));
+  }
+
+  if (nextDay !== null) {
+    const nextDayTopics = typedPlanTopics
+      .filter((topic: PlanTopicRow) => topic.day === nextDay)
+      .sort((first: PlanTopicRow, second: PlanTopicRow) =>
+        first.name.localeCompare(second.name),
+      );
+    const nextTopic = nextDayTopics[0];
+
+    if (nextTopic) {
+      await db
+        .update(topics)
+        .set({ status: "in_progress" })
+        .where(eq(topics.id, nextTopic.id));
+    }
+  }
+
+  await trackUserActivity(userId, {
+    actionType: "topic_completed",
+    entityType: "topic",
+    durationMinutes: Math.max(1, plan.hoursPerDay * 60),
+    metadata: {
+      studyPlanId: plan.id,
+      completedDay: currentDay,
+      completedTopics: currentDayTopics.length,
+      nextDay,
+    },
+  });
+
+  return {
+    completedDay: currentDay,
+    nextDay,
+    completedTopics: currentDayTopics.length,
+  };
 }
 
 export async function updateMetricsAfterQuiz(userId: string, score: number) {
-  const current = await db.query.userMetrics.findFirst({
-    where: eq(userMetrics.userId, userId),
+  await trackUserActivity(userId, {
+    actionType: "quiz_submitted",
+    entityType: "quiz",
+    durationMinutes: 60,
+    metadata: { score },
   });
-
-  const topicsDoneCount = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(topics)
-    .innerJoin(studyPlans, eq(topics.studyPlanId, studyPlans.id))
-    .where(and(eq(studyPlans.userId, userId), eq(topics.status, "completed")));
-
-  const topicsCompleted = Number(topicsDoneCount[0]?.count ?? 0);
-  const quizzesTaken = (current?.quizzesTaken ?? 0) + 1;
-  const averageQuizScore =
-    current && current.quizzesTaken > 0
-      ? (current.averageQuizScore * current.quizzesTaken + score) / quizzesTaken
-      : score;
-
-  const today = getTodayAtMidnight();
-  const existingSession = await db.query.studySessions.findFirst({
-    where: and(eq(studySessions.userId, userId), eq(studySessions.date, today)),
-  });
-
-  if (existingSession) {
-    await db
-      .update(studySessions)
-      .set({ hours: existingSession.hours + 1 })
-      .where(eq(studySessions.id, existingSession.id));
-  } else {
-    await db.insert(studySessions).values({ userId, date: today, hours: 1 });
-  }
-
-  const lastDate = current?.lastStudyDate;
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const isYesterday = lastDate
-    ? new Date(lastDate).toDateString() === yesterday.toDateString()
-    : false;
-  const isToday = lastDate
-    ? new Date(lastDate).toDateString() === today.toDateString()
-    : false;
-
-  const studyStreak = isToday
-    ? (current?.studyStreak ?? 1)
-    : isYesterday
-      ? (current?.studyStreak ?? 0) + 1
-      : 1;
-
-  await db
-    .insert(userMetrics)
-    .values({
-      userId,
-      studyStreak,
-      totalStudyHours: (current?.totalStudyHours ?? 0) + 1,
-      topicsCompleted,
-      averageQuizScore,
-      quizzesTaken,
-      lastStudyDate: today,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: userMetrics.userId,
-      set: {
-        studyStreak,
-        totalStudyHours: (current?.totalStudyHours ?? 0) + 1,
-        topicsCompleted,
-        averageQuizScore,
-        quizzesTaken,
-        lastStudyDate: today,
-        updatedAt: new Date(),
-      },
-    });
 }
 
 export async function getProgressSnapshot(userId: string) {
@@ -609,6 +981,20 @@ export async function getProgressSnapshot(userId: string) {
     orderBy: [studySessions.date],
   });
 
+  const weeklyActivities = await db.query.userActivityLogs.findMany({
+    where: and(
+      eq(userActivityLogs.userId, userId),
+      gte(userActivityLogs.createdAt, getLast7DaysStart()),
+    ),
+    orderBy: [userActivityLogs.createdAt],
+  });
+
+  const recentActivities = await db.query.userActivityLogs.findMany({
+    where: eq(userActivityLogs.userId, userId),
+    orderBy: [desc(userActivityLogs.createdAt)],
+    limit: 20,
+  });
+
   const weeklyStudyHours = Array.from({ length: 7 }, (_, index) => {
     const date = getTodayAtMidnight();
     date.setDate(date.getDate() - (6 - index));
@@ -621,6 +1007,10 @@ export async function getProgressSnapshot(userId: string) {
     return {
       day: dayLabel,
       hours: Number(sameDay?.hours ?? 0),
+      activities: weeklyActivities.filter(
+        (activity: { createdAt: Date }) =>
+          new Date(activity.createdAt).toDateString() === date.toDateString(),
+      ).length,
     };
   });
 
@@ -668,5 +1058,22 @@ export async function getProgressSnapshot(userId: string) {
       : null,
     activePlan: plan,
     planTopics,
+    recentActivity: recentActivities.map(
+      (activity: {
+        id: string;
+        actionType: string;
+        entityType: string;
+        durationMinutes: number;
+        createdAt: Date;
+        metadata: string | null;
+      }) => ({
+        id: activity.id,
+        actionType: activity.actionType,
+        entityType: activity.entityType,
+        durationMinutes: activity.durationMinutes,
+        createdAt: activity.createdAt,
+        metadata: activity.metadata ? JSON.parse(activity.metadata) : null,
+      }),
+    ),
   };
 }

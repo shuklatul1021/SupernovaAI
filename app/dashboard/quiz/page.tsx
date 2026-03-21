@@ -49,26 +49,73 @@ export default function QuizPage() {
   const [previousResult, setPreviousResult] = useState<QuizResult | null>(null);
   const [result, setResult] = useState<QuizResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showGenerateForm, setShowGenerateForm] = useState(false);
+  const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
+  const [generationError, setGenerationError] = useState("");
+  const [quizSubject, setQuizSubject] = useState("");
+  const [quizExam, setQuizExam] = useState("");
+  const [quizQuestionCount, setQuizQuestionCount] = useState(10);
+
+  const loadQuiz = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/quiz", { cache: "no-store" });
+      if (response.ok) {
+        const json = await response.json();
+        setQuestions(json.data.questions as Question[]);
+        setMeta(json.data.meta);
+        setPreviousResult(
+          (json.data.previousResult as QuizResult | null) ?? null,
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadQuiz = async () => {
-      try {
-        const response = await fetch("/api/quiz", { cache: "no-store" });
-        if (response.ok) {
-          const json = await response.json();
-          setQuestions(json.data.questions as Question[]);
-          setMeta(json.data.meta);
-          setPreviousResult(
-            (json.data.previousResult as QuizResult | null) ?? null,
-          );
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadQuiz();
   }, []);
+
+  const handleGenerateQuiz = async () => {
+    if (!quizSubject.trim() || !quizExam.trim()) {
+      setGenerationError("Subject and exam are required.");
+      return;
+    }
+
+    setGenerationError("");
+    setIsGeneratingQuiz(true);
+
+    try {
+      const response = await fetch("/api/quiz/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: quizSubject,
+          exam: quizExam,
+          totalQuestions: quizQuestionCount,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setGenerationError(payload?.error || "Failed to generate quiz.");
+        return;
+      }
+
+      setShowGenerateForm(false);
+      setState("intro");
+      setCurrentQuestion(0);
+      setSelectedAnswers({});
+      setShowExplanation(false);
+      setResult(null);
+      await loadQuiz();
+    } finally {
+      setIsGeneratingQuiz(false);
+    }
+  };
 
   const question = questions[currentQuestion];
   const isAnswered = question && selectedAnswers[question.id] !== undefined;
@@ -110,22 +157,28 @@ export default function QuizPage() {
     return (
       <div className="min-h-[60vh] p-6 lg:p-10 max-w-[1200px] mx-auto flex items-center justify-center">
         <div className="flex flex-col items-center justify-center text-center">
-        <div className="w-16 h-16 rounded-full bg-foreground/[0.04] border border-foreground/10 flex items-center justify-center mb-4">
+          <div className="w-16 h-16 rounded-full bg-foreground/[0.04] border border-foreground/10 flex items-center justify-center mb-4">
             <Spinner className="size-8" />
+          </div>
+          <p className="text-muted-foreground">Loading your dashboard...</p>
         </div>
-        <p className="text-muted-foreground">Loading your dashboard...</p>
-        </div>
-    </div>
-    );
-  }
-
-  if (!questions.length || !meta) {
-    return (
-      <div className="p-6 lg:p-10 max-w-[800px] mx-auto">
-        <p className="text-muted-foreground">No quiz available right now.</p>
       </div>
     );
   }
+
+  const quizMeta =
+    meta ??
+    ({
+      subject: "General",
+      exam: "Diagnostic Quiz",
+      totalQuestions: questions.length,
+      estimatedTime: "15 min",
+    } as {
+      subject: string;
+      exam: string;
+      totalQuestions: number;
+      estimatedTime: string;
+    });
 
   if (state === "intro") {
     return (
@@ -146,23 +199,103 @@ export default function QuizPage() {
 
         <div className="border border-foreground/10 p-8">
           <div className="space-y-6">
+            <div>
+              {!showGenerateForm ? (
+                <Button
+                  variant="outline"
+                  className="w-full rounded-full"
+                  onClick={() => {
+                    setShowGenerateForm(true);
+                    setQuizSubject(quizMeta.subject);
+                    setQuizExam(quizMeta.exam);
+                  }}
+                >
+                  Generate Quiz
+                </Button>
+              ) : (
+                <div className="space-y-3 border border-foreground/10 p-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Subject
+                    </label>
+                    <input
+                      value={quizSubject}
+                      onChange={(event) => setQuizSubject(event.target.value)}
+                      className="w-full px-3 py-2 border border-foreground/10 bg-transparent"
+                      placeholder="e.g. Physics"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Exam
+                    </label>
+                    <input
+                      value={quizExam}
+                      onChange={(event) => setQuizExam(event.target.value)}
+                      className="w-full px-3 py-2 border border-foreground/10 bg-transparent"
+                      placeholder="e.g. JEE 2026"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Questions
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={20}
+                      value={quizQuestionCount}
+                      onChange={(event) =>
+                        setQuizQuestionCount(Number(event.target.value))
+                      }
+                      className="w-full px-3 py-2 border border-foreground/10 bg-transparent"
+                    />
+                  </div>
+                  {generationError ? (
+                    <p className="text-sm text-red-600">{generationError}</p>
+                  ) : null}
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={handleGenerateQuiz}
+                      disabled={isGeneratingQuiz}
+                      className="rounded-full"
+                    >
+                      {isGeneratingQuiz ? "Generating..." : "Create Quiz"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="rounded-full"
+                      onClick={() => {
+                        setShowGenerateForm(false);
+                        setGenerationError("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center gap-4 p-4 bg-foreground/[0.02] border border-foreground/5">
               <BarChart3 className="w-5 h-5 text-muted-foreground" />
               <div>
                 <div className="font-medium text-sm">
-                  {meta.subject} — {meta.exam}
+                  {quizMeta.subject} — {quizMeta.exam}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {meta.totalQuestions} questions · ~{meta.estimatedTime}
+                  {quizMeta.totalQuestions} questions · ~
+                  {quizMeta.estimatedTime}
                 </div>
               </div>
             </div>
 
             <Button
               onClick={() => setState("quiz")}
+              disabled={!questions.length}
               className="w-full bg-foreground hover:bg-foreground/90 text-background h-12 text-base rounded-full group"
             >
-              Start Quiz
+              {questions.length ? "Start Quiz" : "Generate quiz to start"}
               <ArrowRight className="w-4 h-4 ml-2 transition-transform group-hover:translate-x-1" />
             </Button>
           </div>
@@ -197,6 +330,16 @@ export default function QuizPage() {
   }
 
   if (state === "quiz") {
+    if (!questions.length) {
+      return (
+        <div className="p-6 lg:p-10 max-w-[800px] mx-auto">
+          <p className="text-sm text-muted-foreground">
+            No questions found. Generate a quiz first.
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="p-6 lg:p-10 max-w-[800px] mx-auto">
         <div className="mb-8">

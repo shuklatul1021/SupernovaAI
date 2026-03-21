@@ -139,6 +139,29 @@ export const studySessions = pgTable("study_sessions", {
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow(),
 });
 
+export const chatMessages = pgTable("chat_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow(),
+});
+
+export const userActivityLogs = pgTable("user_activity_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  actionType: text("action_type").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: uuid("entity_id"),
+  durationMinutes: integer("duration_minutes").notNull().default(0),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at", { mode: "date" }).defaultNow(),
+});
+
 export const topics = pgTable("topics", {
   id: uuid("id").primaryKey().defaultRandom(),
   studyPlanId: uuid("study_plan_id")

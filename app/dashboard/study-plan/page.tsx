@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { CheckCircle, Circle, ExternalLink, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -18,6 +19,19 @@ type StudyPlanData = {
   currentDay: number;
   hoursPerDay: number;
   overallProgress: number;
+  activeDay: {
+    day: number;
+    date: string | null;
+    topics: Array<{
+      id: string;
+      name: string;
+      status: "completed" | "in_progress" | "pending";
+      difficulty: "easy" | "medium" | "hard";
+      duration: string;
+      content: string;
+      resources: Resource[];
+    }>;
+  } | null;
   days: Array<{
     day: number;
     date: string | null;
@@ -27,6 +41,7 @@ type StudyPlanData = {
       status: "completed" | "in_progress" | "pending";
       difficulty: "easy" | "medium" | "hard";
       duration: string;
+      content: string;
       resources: Resource[];
     }>;
   }>;
@@ -38,6 +53,7 @@ export default function StudyPlanPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
+  const [isCompletingDay, setIsCompletingDay] = useState(false);
 
   const [subject, setSubject] = useState("");
   const [exam, setExam] = useState("");
@@ -96,6 +112,38 @@ export default function StudyPlanPage() {
       await loadPlan();
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleCompleteDay = async () => {
+    setError("");
+    setIsCompletingDay(true);
+
+    try {
+      const response = await fetch("/api/study-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "complete_day" }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        setError(payload?.error || "Failed to complete day.");
+        return;
+      }
+
+      await loadPlan();
+    } finally {
+      setIsCompletingDay(false);
+    }
+  };
+
+  const handleStudyDay = (day: NonNullable<StudyPlanData["activeDay"]>) => {
+    const firstResource = day.topics.flatMap((topic) => topic.resources)[0];
+    if (firstResource?.url) {
+      window.open(firstResource.url, "_blank", "noopener,noreferrer");
     }
   };
 
@@ -265,12 +313,41 @@ export default function StudyPlanPage() {
             {studyPlan.totalDays - studyPlan.currentDay} days remaining
           </span>
         </div>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          {studyPlan.activeDay ? (
+            <Button
+              onClick={() =>
+                handleStudyDay(
+                  studyPlan.activeDay as NonNullable<
+                    StudyPlanData["activeDay"]
+                  >,
+                )
+              }
+              className="rounded-full"
+            >
+              Study Day {studyPlan.activeDay.day}
+            </Button>
+          ) : null}
+
+          <Button
+            variant="outline"
+            onClick={handleCompleteDay}
+            disabled={isCompletingDay}
+            className="rounded-full"
+          >
+            {isCompletingDay ? "Completing..." : "Complete Day"}
+          </Button>
+        </div>
+
+        {error && <p className="text-sm text-red-600 mt-4">{error}</p>}
       </div>
 
       <div className="space-y-6">
         {studyPlan.days.map((day) => {
           const isCurrentDay = day.day === studyPlan.currentDay;
           const isPastDay = day.day < studyPlan.currentDay;
+          const isLockedDay = day.day > studyPlan.currentDay;
           const allCompleted = day.topics.every(
             (topic) => topic.status === "completed",
           );
@@ -320,6 +397,10 @@ export default function StudyPlanPage() {
                     <span className="text-xs font-mono text-green-600 flex items-center gap-1">
                       <CheckCircle className="w-3 h-3" /> Complete
                     </span>
+                  ) : isLockedDay ? (
+                    <span className="text-xs font-mono text-amber-600">
+                      Locked
+                    </span>
                   ) : isCurrentDay ? (
                     <span className="text-xs font-mono text-blue-600 flex items-center gap-1">
                       <Play className="w-3 h-3" /> In Progress
@@ -336,7 +417,7 @@ export default function StudyPlanPage() {
                 {day.topics.map((topic) => (
                   <div
                     key={topic.id}
-                    className="px-6 py-4 flex items-start gap-4"
+                    className={`px-6 py-4 flex items-start gap-4 ${isLockedDay ? "opacity-60" : ""}`}
                   >
                     <div className="mt-0.5">
                       {topic.status === "completed" ? (
@@ -373,14 +454,51 @@ export default function StudyPlanPage() {
                         {topic.duration}
                       </div>
 
+                      <div className="mb-3">
+                        {isLockedDay ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="rounded-full h-8 px-3 text-xs"
+                            disabled
+                          >
+                            View Content
+                          </Button>
+                        ) : (
+                          <Button
+                            asChild
+                            type="button"
+                            variant="outline"
+                            className="rounded-full h-8 px-3 text-xs"
+                          >
+                            <Link
+                              href={`/dashboard/study-plan/module/${topic.id}`}
+                            >
+                              View Content
+                            </Link>
+                          </Button>
+                        )}
+                      </div>
+
                       <div className="flex flex-wrap gap-2">
                         {topic.resources.map((resource, index) => (
                           <a
                             key={`${topic.id}-${index}`}
-                            href={resource.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs px-2 py-1 border border-foreground/10 hover:border-foreground/30 hover:bg-foreground/[0.02] transition-all duration-200"
+                            href={isLockedDay ? undefined : resource.url}
+                            target={isLockedDay ? undefined : "_blank"}
+                            rel={
+                              isLockedDay ? undefined : "noopener noreferrer"
+                            }
+                            onClick={(event) => {
+                              if (isLockedDay) {
+                                event.preventDefault();
+                              }
+                            }}
+                            className={`inline-flex items-center gap-1 text-xs px-2 py-1 border transition-all duration-200 ${
+                              isLockedDay
+                                ? "border-foreground/10 text-muted-foreground cursor-not-allowed"
+                                : "border-foreground/10 hover:border-foreground/30 hover:bg-foreground/[0.02]"
+                            }`}
                           >
                             <span
                               className={`w-1.5 h-1.5 rounded-full ${

@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -14,12 +16,42 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
   const [error, setError] = useState("");
 
   const canSend = useMemo(
     () => message.trim().length > 0 && !isLoading,
     [message, isLoading],
   );
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      try {
+        const response = await fetch("/api/chat", { method: "GET" });
+        const data = (await response.json()) as {
+          success?: boolean;
+          messages?: ChatMessage[];
+          error?: string;
+        };
+
+        if (!response.ok || !Array.isArray(data.messages)) {
+          throw new Error(data.error || "Failed to load chat history");
+        }
+
+        setMessages(data.messages);
+      } catch (caughtError) {
+        const messageText =
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Failed to load chat history";
+        setError(messageText);
+      } finally {
+        setIsHistoryLoading(false);
+      }
+    };
+
+    void loadHistory();
+  }, []);
 
   const handleSend = async () => {
     const text = message.trim();
@@ -70,7 +102,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="p-6 lg:p-10 max-w-4xl mx-auto h-[calc(100vh-56px)] lg:h-screen flex flex-col">
+    <div className="p-6 lg:p-10 max-w-6xl mx-auto h-[calc(100vh-56px)] lg:h-screen flex flex-col">
       <div className="mb-6">
         <span className="inline-flex items-center gap-3 text-sm font-mono text-muted-foreground mb-3">
           <span className="w-8 h-px bg-foreground/30" />
@@ -84,8 +116,12 @@ export default function ChatPage() {
         </p>
       </div>
 
-      <div className="flex-1 border border-foreground/10 p-4 overflow-y-auto space-y-4">
-        {messages.length === 0 ? (
+      <div className="flex-1 border border-foreground/10 p-5 lg:p-6 overflow-y-auto space-y-4">
+        {isHistoryLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner className="size-4" /> Loading chat history...
+          </div>
+        ) : messages.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             Start by asking a question, for example: “How do I improve in
             thermodynamics?”
@@ -94,13 +130,69 @@ export default function ChatPage() {
           messages.map((entry, index) => (
             <div
               key={`${entry.role}-${index}`}
-              className={`max-w-[85%] px-4 py-3 text-sm whitespace-pre-wrap ${
+              className={`max-w-[92%] lg:max-w-[88%] px-4 py-3 text-sm ${
                 entry.role === "user"
                   ? "ml-auto bg-foreground text-background"
                   : "bg-foreground/5 border border-foreground/10"
               }`}
             >
-              {entry.content}
+              {entry.role === "assistant" ? (
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    h1: ({ children }) => (
+                      <h1 className="text-base lg:text-lg font-semibold mb-2">
+                        {children}
+                      </h1>
+                    ),
+                    h2: ({ children }) => (
+                      <h2 className="text-sm lg:text-base font-semibold mb-2">
+                        {children}
+                      </h2>
+                    ),
+                    p: ({ children }) => (
+                      <p className="leading-6 mb-2 last:mb-0">{children}</p>
+                    ),
+                    ul: ({ children }) => (
+                      <ul className="list-disc pl-5 mb-2 space-y-1">
+                        {children}
+                      </ul>
+                    ),
+                    ol: ({ children }) => (
+                      <ol className="list-decimal pl-5 mb-2 space-y-1">
+                        {children}
+                      </ol>
+                    ),
+                    li: ({ children }) => (
+                      <li className="leading-6">{children}</li>
+                    ),
+                    strong: ({ children }) => (
+                      <strong className="font-semibold">{children}</strong>
+                    ),
+                    a: ({ href, children }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline underline-offset-4"
+                      >
+                        {children}
+                      </a>
+                    ),
+                    code: ({ children, className }) => (
+                      <code
+                        className={`font-mono text-xs ${className ?? ""} px-1.5 py-0.5 rounded bg-foreground/10`}
+                      >
+                        {children}
+                      </code>
+                    ),
+                  }}
+                >
+                  {entry.content}
+                </ReactMarkdown>
+              ) : (
+                <p className="whitespace-pre-wrap leading-6">{entry.content}</p>
+              )}
             </div>
           ))
         )}

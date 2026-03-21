@@ -17,6 +17,7 @@ export async function GET() {
       user: snapshot.user,
       progress: snapshot.progress,
       latestQuiz: snapshot.latestQuiz,
+      recentActivity: snapshot.recentActivity,
       activePlan: snapshot.activePlan
         ? {
             id: snapshot.activePlan.id,

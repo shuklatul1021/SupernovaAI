@@ -23,6 +23,9 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'Supernova — AI Study Path Generator',
   description: 'Your AI-powered personal tutor. Take a smart quiz, get a personalized day-by-day study roadmap, and ace your exams with curated free resources.',
+  icons : {
+    icon: "./supernova_ai_logo.svg"
+  }
 }
 
 export default function RootLayout({

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { studyPlans, topics } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
+import { completeCurrentStudyDay } from "@/lib/workspaceInit";
 
 export async function GET() {
   const session = await auth();
@@ -31,6 +32,7 @@ export async function GET() {
     status: string;
     difficulty: string | null;
     resources: string | null;
+    notes: string | null;
   };
 
   const typedTopics = allTopics as TopicRow[];
@@ -84,6 +86,10 @@ export async function GET() {
           status: topic.status,
           difficulty: topic.difficulty ?? "medium",
           duration: "2h",
+          content:
+            topic.notes && topic.notes.trim().length
+              ? topic.notes
+              : `Study ${topic.name} with examples and short revision.`,
           resources: Array.isArray(parsedResources) ? parsedResources : [],
         };
       }),
@@ -110,6 +116,11 @@ export async function GET() {
     ? Math.round((completedTopics / allTopics.length) * 100)
     : 0;
 
+  const activeDay =
+    days.find((day) => day.day === currentDay) ??
+    days.sort((first, second) => first.day - second.day)[0] ??
+    null;
+
   return NextResponse.json({
     success: true,
     data: {
@@ -121,7 +132,36 @@ export async function GET() {
       hoursPerDay: plan.hoursPerDay,
       status: plan.status,
       overallProgress,
-      days,
+      activeDay,
+      days: activeDay ? [activeDay] : [],
     },
   });
+}
+
+export async function POST(request: Request) {
+  const session = await auth();
+
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const body = (await request.json()) as { action?: string };
+
+    if (body.action !== "complete_day") {
+      return NextResponse.json(
+        { error: "Unsupported action" },
+        { status: 400 },
+      );
+    }
+
+    const result = await completeCurrentStudyDay(session.user.id);
+    return NextResponse.json({ success: true, data: result });
+  } catch (error) {
+    console.error("Study plan action failed:", error);
+    return NextResponse.json(
+      { error: "Failed to update study day" },
+      { status: 500 },
+    );
+  }
 }
