@@ -81,7 +81,7 @@ export default function SignUpPage() {
           <div>
             <Link href="/" className="inline-flex items-center gap-2">
               <span className="text-2xl font-display">Supernova</span>
-              <span className="text-xs text-background/50 font-mono">AI</span>
+              <span className="text-[20px] mt-[2px] text-background/50 font-mono">AI</span>
             </Link>
           </div>
           
@@ -113,8 +113,6 @@ export default function SignUpPage() {
           
           <div className="flex items-center gap-4 text-sm text-background/40 font-mono">
             <span>100% free for students</span>
-            <span>·</span>
-            <span>No credit card</span>
           </div>
         </div>
       </div>
@@ -126,7 +124,7 @@ export default function SignUpPage() {
           <div className="lg:hidden mb-12">
             <Link href="/" className="inline-flex items-center gap-2">
               <span className="text-2xl font-display">Supernova</span>
-              <span className="text-xs text-muted-foreground font-mono">AI</span>
+              <span className="text-2xl text-muted-foreground font-mono">AI</span>
             </Link>
           </div>
 

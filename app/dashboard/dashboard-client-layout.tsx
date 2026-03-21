@@ -14,6 +14,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  User,
 } from "lucide-react";
 
 const sidebarLinks = [
@@ -21,6 +22,7 @@ const sidebarLinks = [
   { name: "Study Plan", href: "/dashboard/study-plan", icon: BookOpen },
   { name: "Take Quiz", href: "/dashboard/quiz", icon: Brain },
   { name: "Progress", href: "/dashboard/progress", icon: TrendingUp },
+  { name: "Profile", href: "/dashboard/profile", icon: User },
   { name: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
@@ -40,7 +42,7 @@ export default function DashboardClientLayout({
         <div className="px-6 h-16 flex items-center border-b border-foreground/10">
           <Link href="/" className="flex items-center gap-2">
             <span className="text-xl font-display">Supernova</span>
-            <span className="text-[10px] text-muted-foreground font-mono mt-0.5">AI</span>
+            <span className="text-[15px] text-muted-foreground font-mono mt-0.5">AI</span>
           </Link>
         </div>
 

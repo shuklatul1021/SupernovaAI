@@ -60,7 +60,7 @@ export default function SignInPage() {
           <div>
             <Link href="/" className="inline-flex items-center gap-2">
               <span className="text-2xl font-display">Supernova</span>
-              <span className="text-xs text-background/50 font-mono">AI</span>
+              <span className="text-[20px] mt-[2px] text-background/50 font-mono">AI</span>
             </Link>
           </div>
           

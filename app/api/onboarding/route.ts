@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 export async function POST(request: Request) {
   try {
     const session = await auth();
-    
+
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -15,7 +15,10 @@ export async function POST(request: Request) {
     const { educationLevel, grade, course, branch } = await request.json();
 
     if (!educationLevel || !["school", "college"].includes(educationLevel)) {
-      return NextResponse.json({ error: "Invalid education level" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid education level" },
+        { status: 400 },
+      );
     }
 
     // Insert detailed background
@@ -28,10 +31,12 @@ export async function POST(request: Request) {
     });
 
     // Update user record onboarding flag
-    await db.update(users)
-      .set({ 
+    await db
+      .update(users)
+      .set({
         educationLevel,
-        onboardingCompleted: 1 
+        onboardingCompleted: 1,
+        workspaceInitialized: 0,
       })
       .where(eq(users.id, session.user.id));
 
@@ -40,7 +45,7 @@ export async function POST(request: Request) {
     console.error("Onboarding error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

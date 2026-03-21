@@ -11,7 +11,7 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
-  
+
   if (!session?.user?.id) {
     redirect("/auth/signin");
   }
@@ -19,11 +19,15 @@ export default async function DashboardLayout({
   // Check onboarding status
   const user = await db.query.users.findFirst({
     where: eq(users.id, session.user.id),
-    columns: { onboardingCompleted: true },
+    columns: { onboardingCompleted: true, workspaceInitialized: true },
   });
 
   if (!user?.onboardingCompleted) {
     redirect("/onboarding");
+  }
+
+  if (!user.workspaceInitialized) {
+    redirect("/onboarding/creating-workspace");
   }
 
   return <DashboardClientLayout>{children}</DashboardClientLayout>;
