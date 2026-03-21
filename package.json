@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "drizzle-kit generate && db:migrate && next build",
+    "build": "drizzle-kit generate && drizzle-kit migrate && next build",
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
