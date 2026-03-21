@@ -138,12 +138,13 @@ export function HeroSection() {
             </Button>
           </div>
         </div>
-        
+        {/* Spacer to prevent overlap on small screens */}
+        <div className="h-24 lg:h-32"></div>
       </div>
       
       {/* Stats marquee - full width outside container */}
       <div 
-        className={`absolute bottom-24 left-0 right-0 mt-16 transition-all duration-700 delay-500 ${
+        className={`absolute bottom-8 sm:bottom-12 left-0 right-0 mt-16 transition-all duration-700 delay-500 ${
           isVisible ? "opacity-100" : "opacity-0"
         }`}
       >
