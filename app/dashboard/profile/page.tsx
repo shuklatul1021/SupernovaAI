@@ -69,19 +69,36 @@ export default async function ProfilePage() {
     return { date, intensity };
   });
 
-  const monthMarkers = activityData
-    .map((entry, index) => ({
-      index,
-      month: entry.date.toLocaleDateString("en-US", { month: "short" }),
-      year: entry.date.getFullYear(),
-    }))
-    .filter((entry, index, array) => {
-      if (index === 0) {
-        return true;
+  const weeks = Array.from(
+    { length: Math.ceil(activityData.length / 7) },
+    (_, weekIndex) => activityData.slice(weekIndex * 7, (weekIndex + 1) * 7),
+  );
+
+  const monthLabels = weeks
+    .map((week, weekIndex) => {
+      const firstDay = week[0]?.date;
+      if (!firstDay) {
+        return null;
       }
-      const previous = array[index - 1];
-      return previous.month !== entry.month || previous.year !== entry.year;
-    });
+
+      const label = firstDay.toLocaleDateString("en-US", {
+        month: "short",
+      });
+
+      if (weekIndex === 0) {
+        return { weekIndex, label };
+      }
+
+      const previousFirstDay = weeks[weekIndex - 1]?.[0]?.date;
+      const previousLabel = previousFirstDay
+        ? previousFirstDay.toLocaleDateString("en-US", { month: "short" })
+        : "";
+
+      return previousLabel !== label ? { weekIndex, label } : null;
+    })
+    .filter((entry): entry is { weekIndex: number; label: string } =>
+      Boolean(entry),
+    );
 
   const memberSince = user?.createdAt
     ? new Date(user.createdAt).toLocaleDateString("en-US", {
@@ -198,45 +215,51 @@ export default async function ProfilePage() {
         </div>
 
         <div className="bg-background rounded-3xl border border-foreground/10 p-6 md:p-8 overflow-x-auto">
-          <div className="flex min-w-max mb-2 text-[10px] text-muted-foreground font-mono">
-            {monthMarkers.map((marker) => (
-              <div
-                key={`${marker.month}-${marker.year}-${marker.index}`}
-                className="absolute"
-                style={{ left: `${marker.index * 5}px` }}
-              />
-            ))}
-          </div>
+          <div className="min-w-max">
+            <div className="pl-9 mb-3 h-4 relative">
+              {monthLabels.map((entry) => (
+                <span
+                  key={`${entry.label}-${entry.weekIndex}`}
+                  className="absolute text-[10px] text-muted-foreground font-mono"
+                  style={{ left: `${entry.weekIndex * 20}px` }}
+                >
+                  {entry.label}
+                </span>
+              ))}
+            </div>
 
-          <div className="relative min-w-max mb-3 h-4">
-            {monthMarkers.map((marker) => (
-              <span
-                key={`${marker.month}-${marker.year}-${marker.index}-label`}
-                className="absolute text-[10px] text-muted-foreground font-mono"
-                style={{ left: `${Math.floor(marker.index / 7) * 20}px` }}
-              >
-                {marker.month}
-              </span>
-            ))}
-          </div>
+            <div className="flex items-start gap-2">
+              <div className="flex flex-col gap-1 text-[10px] text-muted-foreground font-mono pt-0.5">
+                <span className="h-4">Mon</span>
+                <span className="h-4">Wed</span>
+                <span className="h-4">Fri</span>
+              </div>
 
-          <div className="flex gap-1 min-w-max">
-            {/* Split data into columns of 7 days (weeks) */}
-            {Array.from({ length: Math.ceil(activityData.length / 7) }).map(
-              (_, weekIndex) => (
-                <div key={weekIndex} className="flex flex-col gap-1">
-                  {activityData
-                    .slice(weekIndex * 7, (weekIndex + 1) * 7)
-                    .map((day, dayIndex) => (
-                      <div
-                        key={dayIndex}
-                        title={`${day.date.toDateString()}: ${day.intensity > 0 ? day.intensity + " study sessions" : "No activity"}`}
-                        className={`w-4 h-4 rounded-sm transition-colors hover:ring-2 ring-foreground/30 ${getIntensityColor(day.intensity)}`}
-                      />
-                    ))}
-                </div>
-              ),
-            )}
+              <div className="flex gap-1">
+                {weeks.map((week, weekIndex) => (
+                  <div key={weekIndex} className="flex flex-col gap-1">
+                    {Array.from({ length: 7 }, (_, dayIndex) => {
+                      const day = week[dayIndex];
+                      return (
+                        <div
+                          key={dayIndex}
+                          title={
+                            day
+                              ? `${day.date.toDateString()}: ${day.intensity > 0 ? day.intensity + " study sessions" : "No activity"}`
+                              : "No activity"
+                          }
+                          className={`w-4 h-4 rounded-[4px] border border-foreground/10 transition-all duration-200 ${
+                            day
+                              ? `${getIntensityColor(day.intensity)} hover:scale-110 hover:border-foreground/30`
+                              : "bg-transparent"
+                          }`}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div className="mt-6 flex items-center justify-between text-xs text-muted-foreground font-mono">
